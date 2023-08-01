@@ -95,6 +95,86 @@ def test_signtx_eip1559(client: Client, parameters, result):
     assert sig_v == result["sig_v"]
 
 
+def test_signtx_erc20_balanceof_misaligned_data(client: Client):
+    # "Data" field for a 'balanceOf' call with two last bytes removed.
+    with pytest.raises(TrezorFailure):
+        with client:
+            sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
+                client,
+                n=parse_path("m/44h/60h/0h/0/0"),
+                nonce=0,
+                gas_limit=20,
+                max_gas_fee=20,
+                max_priority_fee=1,
+                to=TO_ADDR,
+                chain_id=1,
+                value=0,
+                data=bytes.fromhex(
+                    "70a08231000000000000000000000000574bbb36871ba6b78e27f4b4dcfb76ea009188"
+                ),
+            )
+
+
+def test_signtx_erc20_balanceof(client: Client):
+    # "Data" field for a 'balanceOf' call. The function checks the balance of the address 0x574bbb36871ba6b78e27f4b4dcfb76ea0091880b
+    # The function has 1 argument: 'address'
+    with client:
+        sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
+            client,
+            n=parse_path("m/44h/60h/0h/0/0"),
+            nonce=0,
+            gas_limit=20,
+            max_gas_fee=20,
+            max_priority_fee=1,
+            to=TO_ADDR,
+            chain_id=1,
+            value=0,
+            data=bytes.fromhex(
+                "70a08231000000000000000000000000574bbb36871ba6b78e27f4b4dcfb76ea0091880b"
+            ),
+        )
+
+
+def test_signtx_erc20_allowance(client: Client):
+    # "Data" field for an 'allowance' call. This function checks the amount of tokens that an owner allowed to a spender.
+    # The function has 2 arguments: 'address', 'address'
+    with client:
+        sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
+            client,
+            n=parse_path("m/44h/60h/0h/0/0"),
+            nonce=0,
+            gas_limit=20,
+            max_gas_fee=20,
+            max_priority_fee=1,
+            to=TO_ADDR,
+            chain_id=1,
+            value=0,
+            data=bytes.fromhex(
+                "dd62ed3e0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000574bbb36871ba6b78e27f4b4dcfb76ea0091880b"
+            ),
+        )
+
+
+def test_signtx_erc20_transferfrom(client: Client):
+    # "Data" field for a 'transferFrom' call. The function allows a spender to transfer a certain amount of tokens from the owner's balance to another address.
+    # The function has 3 arguments: 'from', 'to', 'value'
+    with client:
+        sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
+            client,
+            n=parse_path("m/44h/60h/0h/0/0"),
+            nonce=0,
+            gas_limit=20,
+            max_gas_fee=20,
+            max_priority_fee=1,
+            to=TO_ADDR,
+            chain_id=1,
+            value=0,
+            data=bytes.fromhex(
+                "23b872dd0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000574bbb36871ba6b78e27f4b4dcfb76ea0091880b0000000000000000000000000000000000000000000000000000000000000064"
+            ),
+        )
+
+
 def test_sanity_checks(client: Client):
     """Is not vectorized because these are internal-only tests that do not
     need to be exposed to the public.

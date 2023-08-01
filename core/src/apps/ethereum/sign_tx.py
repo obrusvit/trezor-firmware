@@ -33,7 +33,6 @@ async def sign_tx(
     from .layout import (
         require_confirm_data,
         require_confirm_fee,
-        require_confirm_tx,
     )
 
     # check
@@ -45,14 +44,8 @@ async def sign_tx(
 
     await paths.validate_path(keychain, msg.address_n)
 
-    # Handle ERC20s
-    token, address_bytes, recipient, value = await handle_erc20(msg, defs)
-
-    data_total = msg.data_length
-
-    await require_confirm_tx(recipient, value, defs.network, token)
-    if token is None and msg.data_length > 0:
-        await require_confirm_data(msg.data_initial_chunk, data_total)
+    address_bytes = bytes_from_address(msg.to)
+    token, value = await sign_tx_common(msg, defs, address_bytes)
 
     await require_confirm_fee(
         value,
@@ -62,6 +55,7 @@ async def sign_tx(
         token,
     )
 
+    data_total = msg.data_length
     data = bytearray()
     data += msg.data_initial_chunk
     data_left = data_total - len(msg.data_initial_chunk)
@@ -99,33 +93,102 @@ async def sign_tx(
     return result
 
 
-async def handle_erc20(
+async def sign_tx_common(
     msg: MsgInSignTx,
     definitions: Definitions,
-) -> tuple[EthereumTokenInfo | None, bytes, bytes, int]:
-    from .layout import require_confirm_unknown_token
+    address_bytes: bytes,
+) -> tuple[EthereumTokenInfo | None, bytes, bytes, int, str | None]:
+    from .layout import (
+        require_confirm_unknown_token,
+        require_confirm_smart_contract,
+        require_confirm_tx,
+        require_confirm_data,
+    )
     from . import tokens
 
     data_initial_chunk = msg.data_initial_chunk  # local_cache_attribute
     token = None
-    address_bytes = recipient = bytes_from_address(msg.to)
     value = int.from_bytes(msg.value, "big")
-    if (
-        len(msg.to) in (40, 42)
-        and len(msg.value) == 0
-        and msg.data_length == 68
-        and len(data_initial_chunk) == 68
-        and data_initial_chunk[:16]
-        == b"\xa9\x05\x9c\xbb\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-    ):
+    if len(msg.to) in (40, 42) and value == 0:
+        # TODO handle exception, we want to confirm "data" in except branch
+        # TODO handle data_initial_chunk shorter than 4 bytes
+        func_name, func_args = _resolve_tx_data_field(data_initial_chunk)
         token = definitions.get_token(address_bytes)
-        recipient = data_initial_chunk[16:36]
-        value = int.from_bytes(data_initial_chunk[36:68], "big")
-
         if token is tokens.UNKNOWN_TOKEN:
             await require_confirm_unknown_token(address_bytes)
+        await require_confirm_smart_contract(func_name, func_args)
+    else:
+        await require_confirm_tx(address_bytes, value, definitions.network, token)
+        if msg.data_length > 0:
+            await require_confirm_data(data_initial_chunk, msg.data_length)
 
-    return token, address_bytes, recipient, value
+    return token, value
+
+
+def _resolve_type(val: bytes, t: type) -> t:
+    from ubinascii import hexlify
+
+    if t is int:
+        return int.from_bytes(val, "big")
+    elif t is str:
+        return hexlify(val).decode()
+    else:
+        return val
+
+
+FUNCTIONS_DEF: dict[bytes, dict] = {
+    b"\xa9\x05\x9c\xbb": {
+        "name": "transfer",
+        "args": [
+            ("Recipient", bytes),
+            ("Amount", bytes),
+        ],
+    },
+    b"\x09\x5e\xa7\xb3": {
+        "name": "approve",
+        "args": [
+            ("Address", bytes),
+            ("Amount", int),  # TODO int does not work, ERROR in Rust
+        ],
+    },
+}
+
+
+def _resolve_tx_data_field(
+    data_bytes: bytes,
+) -> tuple[str | bytes, list[tuple[str, str | bytes]]]:
+
+    data_args_len = len(data_bytes)
+    N_BYTES_FUNC = 4
+    N_BYTES_ARG = 32
+    n_args = (data_args_len - N_BYTES_FUNC) // N_BYTES_ARG
+    data = memoryview(data_bytes)
+
+    def _data_field_aligned(data_args_len: int, n_args: int) -> bool:
+        # checks if "Data" field doesn't have trailing bytes
+        return data_args_len == (n_args * N_BYTES_ARG + N_BYTES_FUNC)
+
+    def _get_nth_arg(data_mv: memoryview, n: int) -> memoryview:
+        # returns slice of the nth argument in "Data" field
+        beg = (n + 0) * N_BYTES_ARG + N_BYTES_FUNC
+        end = (n + 1) * N_BYTES_ARG + N_BYTES_FUNC
+        return data_mv[beg:end]
+
+    if not _data_field_aligned(data_args_len, n_args):
+        raise ValueError
+
+    func_signature_bytes = data_bytes[:N_BYTES_FUNC]
+    func_def = FUNCTIONS_DEF.get(func_signature_bytes, None)
+    if func_def is not None and n_args == len(func_def["args"]):
+        func_name = func_def["name"]
+        func_args = [
+            (f"{name}:", _resolve_type(bytes(_get_nth_arg(data, i)), type_))
+            for i, (name, type_) in enumerate(func_def["args"])
+        ]
+    else:
+        func_name = _resolve_type(func_signature_bytes, str)
+        func_args = [(f"Input {i}:", _get_nth_arg(data, i)) for i in range(n_args)]
+    return (func_name, func_args)
 
 
 def _get_total_length(msg: EthereumSignTx, data_total: int) -> int:

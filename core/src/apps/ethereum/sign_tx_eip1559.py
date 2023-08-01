@@ -38,12 +38,8 @@ async def sign_tx_eip1559(
     from trezor import wire
     from trezor.crypto import rlp  # local_cache_global
     from apps.common import paths
-    from .layout import (
-        require_confirm_data,
-        require_confirm_eip1559_fee,
-        require_confirm_tx,
-    )
-    from .sign_tx import handle_erc20, send_request_chunk, check_common_fields
+    from .layout import require_confirm_eip1559_fee
+    from .sign_tx import sign_tx_common, send_request_chunk, check_common_fields
 
     gas_limit = msg.gas_limit  # local_cache_attribute
 
@@ -56,14 +52,8 @@ async def sign_tx_eip1559(
 
     await paths.validate_path(keychain, msg.address_n)
 
-    # Handle ERC20s
-    token, address_bytes, recipient, value = await handle_erc20(msg, defs)
-
-    data_total = msg.data_length
-
-    await require_confirm_tx(recipient, value, defs.network, token)
-    if token is None and msg.data_length > 0:
-        await require_confirm_data(msg.data_initial_chunk, data_total)
+    address_bytes = bytes_from_address(msg.to)
+    token, value = await sign_tx_common(msg, defs, address_bytes)
 
     await require_confirm_eip1559_fee(
         value,
@@ -74,6 +64,7 @@ async def sign_tx_eip1559(
         token,
     )
 
+    data_total = msg.data_length
     data = bytearray()
     data += msg.data_initial_chunk
     data_left = data_total - len(msg.data_initial_chunk)

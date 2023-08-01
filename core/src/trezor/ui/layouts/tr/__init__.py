@@ -831,7 +831,8 @@ async def confirm_properties(
     from ubinascii import hexlify
 
     def handle_bytes(prop: PropertyType):
-        if isinstance(prop[1], bytes):
+        if isinstance(prop[1], (bytes, bytearray, memoryview)):
+            # TODO decode would fail on memoryview
             return (prop[0], hexlify(prop[1]).decode(), True)
         else:
             # When there is not space in the text, taking it as data
