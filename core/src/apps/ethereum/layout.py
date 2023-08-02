@@ -45,7 +45,7 @@ def require_confirm_tx(
 
 
 async def require_confirm_smart_contract(
-    func_name: str, func_args: list[tuple[str, str | bytes]]
+    func_name: str | bytes, func_args: list[tuple[str, str | bytes]]
 ):
     from trezor.ui.layouts import confirm_properties
 
@@ -264,8 +264,8 @@ def format_ethereum_amount(
         suffix = network.symbol
         decimals = 18
 
-    # Don't want to display wei values for tokens with small decimal numbers
-    if decimals > 9 and value < 10 ** (decimals - 9):
+    # Don't want to display wei values for tokens with small but nonzero decimal numbers
+    if decimals > 9 and 0 < value < 10 ** (decimals - 9):
         suffix = "Wei " + suffix
         decimals = 0
 
